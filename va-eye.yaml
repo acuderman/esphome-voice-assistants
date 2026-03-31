@@ -86,6 +86,10 @@ globals:
     type: std::string
     restore_value: false
     initial_value: '""'
+  - id: anim_frame
+    type: int
+    restore_value: false
+    initial_value: "0"
 
 # -------------------------------------------------------
 # I2C — ES8311 codec control
@@ -258,17 +262,31 @@ media_player:
             - script.execute: draw_display
 
 # -------------------------------------------------------
+# Animation interval
+# -------------------------------------------------------
+interval:
+  - interval: 120ms
+    then:
+      - lambda: id(anim_frame) = (id(anim_frame) + 1) % 3600;
+      - if:
+          condition:
+            or:
+              - lambda: return id(voice_assistant_phase) == ${voice_assist_listening_phase_id};
+              - lambda: return id(voice_assistant_phase) == ${voice_assist_thinking_phase_id};
+              - lambda: return id(voice_assistant_phase) == ${voice_assist_replying_phase_id};
+              - lambda: return (id(anim_frame) % 5 == 0) && (id(voice_assistant_phase) == ${voice_assist_idle_phase_id});
+          then:
+            - component.update: lcd
+
+# -------------------------------------------------------
 # Wake word
 # -------------------------------------------------------
 micro_wake_word:
   id: mww
   models:
     - model: okay_nabu
-      probability_cutoff: 0.85
-      sliding_window_size: 10
-    - model: hey_jarvis
-      probability_cutoff: 0.85
-      sliding_window_size: 10
+      probability_cutoff: 0.95
+      sliding_window_size: 15
   on_wake_word_detected:
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
@@ -282,6 +300,7 @@ voice_assistant:
   media_player: mp
   micro_wake_word: mww
   noise_suppression_level: 2
+  auto_gain: 31dBFS
   volume_multiplier: 4.0
 
   on_listening:
@@ -327,12 +346,14 @@ voice_assistant:
           - media_player.is_announcing:
         timeout: 0.5s
     - wait_until:
-        - and:
-            - not:
-                media_player.is_announcing:
-            - not:
-                speaker.is_playing:
-                  id: spk
+        condition:
+          - and:
+              - not:
+                  media_player.is_announcing:
+              - not:
+                  speaker.is_playing:
+                    id: spk
+        timeout: 60s
     - if:
         condition:
           - lambda: return id(wake_word_engine_location).current_option() == "On device";
@@ -487,8 +508,11 @@ font:
     id: font_large
     size: 30
   - file: "gfonts://Roboto"
+    id: font_medium
+    size: 22
+  - file: "gfonts://Roboto"
     id: font_small
-    size: 16
+    size: 14
 
 display:
   - platform: mipi_spi
@@ -502,52 +526,291 @@ display:
     pages:
       - id: page_initializing
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 100, id(font_large), Color(200,200,200), TextAlign::CENTER, "Starting...");
+          it.fill(Color(3, 3, 10));
+          it.circle(120, 120, 115, Color(30, 30, 55));
+          int n = 24, head = (id(anim_frame) * 2) % n;
+          for (int i = 0; i < 14; i++) {
+            int pos = (head - i + n) % n;
+            float ang = pos * (2.0f * 3.14159f / n);
+            int x = 120 + (int)(88.0f * sinf(ang));
+            int y = 120 - (int)(88.0f * cosf(ang));
+            uint8_t b = (uint8_t)std::max(0, 220 - i * 15);
+            it.filled_circle(x, y, 3, Color(b/5, b/5, b));
+          }
+          // Sleepy eyes shifting side to side
+          int look = (id(anim_frame) / 25) % 3;
+          int px = (look == 0) ? -3 : (look == 2 ? 3 : 0);
+          it.filled_circle(85,  100, 11, Color(210, 210, 230));
+          it.filled_circle(85 + px, 101, 5, Color(20, 20, 40));
+          it.filled_circle(155, 100, 11, Color(210, 210, 230));
+          it.filled_circle(155 + px, 101, 5, Color(20, 20, 40));
+          it.filled_rectangle(107, 127, 26, 3, Color(160, 160, 185));
+
       - id: page_no_wifi
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 110, id(font_large), Color(255,100,0), TextAlign::CENTER, "No WiFi");
+          it.fill(Color(10, 2, 2));
+          it.circle(120, 120, 115, Color(100, 15, 15));
+          it.circle(120, 120, 90,  Color(70,  10, 10));
+          it.circle(120, 120, 65,  Color(45,   8,  8));
+          // Sad eyebrows (angled down toward center)
+          it.line(73, 85, 96, 91, Color(220, 70, 70));
+          it.line(73, 86, 96, 92, Color(220, 70, 70));
+          it.line(144, 91, 167, 85, Color(220, 70, 70));
+          it.line(144, 92, 167, 86, Color(220, 70, 70));
+          // Sad eyes (pupils down)
+          it.filled_circle(85,  100, 12, Color(225, 195, 195));
+          it.filled_circle(85,  104,  5, Color(60,  20,  20));
+          it.filled_circle(155, 100, 12, Color(225, 195, 195));
+          it.filled_circle(155, 104,  5, Color(60,  20,  20));
+          // Frown
+          for (int i = -24; i <= 24; i += 3) {
+            float t = (float)i / 24.0f;
+            int y = 135 - (int)(10.0f * (1.0f - t*t));
+            it.filled_circle(120 + i, y, 2, Color(220, 70, 70));
+          }
+
       - id: page_no_ha
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 90,  id(font_large), Color(255,100,0),   TextAlign::CENTER, "No HA");
-          it.print(120, 130, id(font_small), Color(150,150,150), TextAlign::CENTER, "Connecting...");
+          it.fill(Color(8, 6, 0));
+          it.circle(120, 120, 115, Color(80, 50, 0));
+          int n = 24, head = id(anim_frame) % n;
+          for (int i = 0; i < 12; i++) {
+            int pos = (head - i + n) % n;
+            float ang = pos * (2.0f * 3.14159f / n);
+            int x = 120 + (int)(93.0f * sinf(ang));
+            int y = 120 - (int)(93.0f * cosf(ang));
+            uint8_t b = (uint8_t)std::max(0, 220 - i * 18);
+            it.filled_circle(x, y, 3, Color(b, b/2, 0));
+          }
+          // Confused eyebrows (one up, one down)
+          it.line(73, 87, 96, 81, Color(200, 150, 30));
+          it.line(73, 88, 96, 82, Color(200, 150, 30));
+          it.line(144, 83, 167, 89, Color(200, 150, 30));
+          it.line(144, 84, 167, 90, Color(200, 150, 30));
+          // Normal eyes, one pupil shifted
+          it.filled_circle(85,  100, 12, Color(225, 215, 175));
+          it.filled_circle(85,  100,  5, Color(40,  30,  10));
+          it.filled_circle(155, 100, 12, Color(225, 215, 175));
+          it.filled_circle(158,  97,  5, Color(40,  30,  10));
+          // Wavy confused mouth
+          for (int i = -22; i <= 22; i += 4) {
+            int y = 130 + (int)(5.0f * sinf((float)i * 0.25f));
+            it.filled_circle(120 + i, y, 2, Color(200, 150, 30));
+          }
+
       - id: page_idle
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 90,  id(font_large), Color(255,255,255), TextAlign::CENTER, "Ready");
-          it.print(120, 130, id(font_small), Color(100,100,100), TextAlign::CENTER, "Say OK Nabu");
+          it.fill(Color(3, 3, 10));
+          // Outer breathing glow
+          float br = 0.5f + 0.5f * sinf(id(anim_frame) * 0.06f);
+          int ring_r = 92 + (int)(14.0f * br);
+          uint8_t rb = (uint8_t)(18 + 25 * br);
+          it.circle(120, 120, ring_r,     Color(rb/4, rb/4, rb));
+          it.circle(120, 120, ring_r - 1, Color(rb/6, rb/6, rb/2));
+          it.circle(120, 120, 115, Color(14, 14, 26));
+          // Ambient floating particles
+          for (int p = 0; p < 5; p++) {
+            float ph = p * 1.2566f;
+            float ag = ph + id(anim_frame) * 0.004f;
+            float ob = 50.0f + 10.0f * sinf(ph * 1.5f);
+            int ppx = 120 + (int)(ob * cosf(ag));
+            int ppy = 120 + (int)(ob * sinf(ag));
+            uint8_t pb = (uint8_t)(12 + 12 * sinf(ag + ph));
+            it.filled_circle(ppx, ppy, 1, Color(pb/3, pb/3, pb));
+          }
+          // Eyebrows (relaxed, gentle arch)
+          it.line(73, 81, 96, 78, Color(150, 150, 175));
+          it.line(73, 82, 96, 79, Color(150, 150, 175));
+          it.line(144, 78, 167, 81, Color(150, 150, 175));
+          it.line(144, 79, 167, 82, Color(150, 150, 175));
+          // Eyes with periodic blink
+          int bl = id(anim_frame) % 70;
+          it.filled_circle(85, 100, 13, Color(235, 235, 245));
+          if (bl < 66) {
+            it.filled_circle(86, 101, 6, Color(20, 20, 40));
+            it.filled_circle(90, 97,  2, Color(255, 255, 255));
+          } else {
+            it.filled_rectangle(72, 99, 26, 3, Color(235, 235, 245));
+          }
+          it.filled_circle(155, 100, 13, Color(235, 235, 245));
+          if (bl < 66) {
+            it.filled_circle(156, 101, 6, Color(20, 20, 40));
+            it.filled_circle(160, 97,  2, Color(255, 255, 255));
+          } else {
+            it.filled_rectangle(142, 99, 26, 3, Color(235, 235, 245));
+          }
+          // Gentle smile
+          for (int i = -26; i <= 26; i += 3) {
+            float t = (float)i / 26.0f;
+            int y = 128 + (int)(8.0f * (1.0f - t*t));
+            it.filled_circle(120 + i, y, 2, Color(185, 185, 215));
+          }
+
       - id: page_listening
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 110, id(font_large), Color(0,150,255), TextAlign::CENTER, "Listening");
+          it.fill(Color(0, 4, 16));
+          it.circle(120, 120, 116, Color(0, 75, 165));
+          // Sonar rings expanding outward
+          for (int w = 0; w < 3; w++) {
+            int r = (id(anim_frame) * 2 + w * 32) % 95 + 15;
+            uint8_t a = (uint8_t)std::max(0, 240 - r * 2);
+            if (a > 20) it.circle(120, 120, r, Color(0, a * 2/3, a));
+          }
+          // Rotating blue comet
+          int n = 36, head = (id(anim_frame) * 3) % n;
+          for (int i = 0; i < 22; i++) {
+            int pos = (head - i + n) % n;
+            float ang = pos * (2.0f * 3.14159f / n);
+            int x = 120 + (int)(98.0f * sinf(ang));
+            int y = 120 - (int)(98.0f * cosf(ang));
+            uint8_t b = (uint8_t)std::max(30, 255 - i * 10);
+            it.filled_circle(x, y, 3, Color(0, b * 2/3, b));
+          }
+          // Raised alert eyebrows
+          it.line(73, 74, 96, 69, Color(140, 195, 255));
+          it.line(73, 75, 96, 70, Color(140, 195, 255));
+          it.line(144, 69, 167, 74, Color(140, 195, 255));
+          it.line(144, 70, 167, 75, Color(140, 195, 255));
+          // Wide alert eyes
+          it.filled_circle(85,  100, 14, Color(230, 238, 255));
+          it.filled_circle(86,  101,  7, Color(10,  10,  50));
+          it.filled_circle(91,  96,   2, Color(255, 255, 255));
+          it.filled_circle(155, 100, 14, Color(230, 238, 255));
+          it.filled_circle(156, 101,  7, Color(10,  10,  50));
+          it.filled_circle(161, 96,   2, Color(255, 255, 255));
+          // Slightly open mouth
+          it.filled_circle(120, 130, 8, Color(15, 15, 40));
+          it.circle(120, 130, 9, Color(180, 215, 255));
+
       - id: page_thinking
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 75, id(font_large), Color(255,200,0), TextAlign::CENTER, "Thinking...");
-          if (!id(stt_text).empty()) {
-            std::string t = id(stt_text);
-            if (t.length() > 22) t = t.substr(0, 20) + "..";
-            it.print(120, 135, id(font_small), Color(200,200,200), TextAlign::CENTER, t.c_str());
+          it.fill(Color(10, 8, 0));
+          it.circle(120, 120, 116, Color(90, 58, 0));
+          // Fast amber comet
+          int n = 36, head = (id(anim_frame) * 4) % n;
+          for (int i = 0; i < 22; i++) {
+            int pos = (head - i + n) % n;
+            float ang = pos * (2.0f * 3.14159f / n);
+            int x = 120 + (int)(95.0f * sinf(ang));
+            int y = 120 - (int)(95.0f * cosf(ang));
+            uint8_t b = (uint8_t)std::max(25, 255 - i * 10);
+            it.filled_circle(x, y, 3, Color(b, b * 2/3, 0));
           }
+          // Asymmetric eyebrows — left raised (thinking)
+          it.line(73, 74, 96, 80, Color(195, 155, 25));
+          it.line(73, 75, 96, 81, Color(195, 155, 25));
+          it.line(144, 82, 167, 78, Color(195, 155, 25));
+          it.line(144, 83, 167, 79, Color(195, 155, 25));
+          // Thinking eyes — pupils shifted up-right
+          it.filled_circle(85,  100, 12, Color(228, 222, 195));
+          it.filled_circle(88,   96,  5, Color(30,  25,   0));
+          it.filled_circle(91,   93,  2, Color(255, 255, 200));
+          it.filled_circle(155, 100, 12, Color(228, 222, 195));
+          it.filled_circle(158,  96,  5, Color(30,  25,   0));
+          it.filled_circle(161,  93,  2, Color(255, 255, 200));
+          // Neutral mouth
+          it.filled_rectangle(104, 128, 32, 3, Color(195, 155, 25));
+          // Three pulsing thinking dots
+          float dt = id(anim_frame) * 0.25f;
+          uint8_t da = (uint8_t)(80 + 80 * sinf(dt));
+          uint8_t db2 = (uint8_t)(80 + 80 * sinf(dt + 1.05f));
+          uint8_t dc = (uint8_t)(80 + 80 * sinf(dt + 2.1f));
+          it.filled_circle(104, 148, 5, Color(da,  da  * 2/3, 0));
+          it.filled_circle(120, 148, 5, Color(db2, db2 * 2/3, 0));
+          it.filled_circle(136, 148, 5, Color(dc,  dc  * 2/3, 0));
+          // STT text — what was heard
+          std::string stt = id(stt_text);
+          if (!stt.empty()) {
+            if (stt.length() <= 14) {
+              it.print(120, 168, id(font_medium), Color(255, 210, 75), TextAlign::CENTER, stt.c_str());
+            } else {
+              size_t sp = stt.rfind(' ', 14);
+              if (sp == std::string::npos) sp = 14;
+              std::string l1 = stt.substr(0, sp);
+              std::string l2 = stt.substr(stt[sp] == ' ' ? sp+1 : sp);
+              if (l2.length() > 14) l2 = l2.substr(0, 12) + "..";
+              it.print(120, 160, id(font_medium), Color(255, 210, 75), TextAlign::CENTER, l1.c_str());
+              it.print(120, 184, id(font_medium), Color(255, 210, 75), TextAlign::CENTER, l2.c_str());
+            }
+          }
+
       - id: page_replying
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 75, id(font_large), Color(0,220,100), TextAlign::CENTER, "Speaking");
-          if (!id(stt_text).empty()) {
-            std::string t = id(stt_text);
-            if (t.length() > 22) t = t.substr(0, 20) + "..";
-            it.print(120, 135, id(font_small), Color(200,200,200), TextAlign::CENTER, t.c_str());
+          it.fill(Color(0, 8, 4));
+          it.circle(120, 120, 116, Color(0, 78, 40));
+          // Pulsing green rings
+          float at = id(anim_frame) * 0.18f;
+          it.circle(120, 120, (int)(42 + 10*sinf(at)),        Color(0, 200, 95));
+          it.circle(120, 120, (int)(60 + 10*sinf(at + 1.1f)), Color(0, 155, 70));
+          it.circle(120, 120, (int)(78 + 10*sinf(at + 2.2f)), Color(0, 108, 50));
+          // Happy eyebrows (angled up at outer edge)
+          it.line(73, 82, 96, 77, Color(95, 235, 145));
+          it.line(73, 83, 96, 78, Color(95, 235, 145));
+          it.line(144, 77, 167, 82, Color(95, 235, 145));
+          it.line(144, 78, 167, 83, Color(95, 235, 145));
+          // Happy squint eyes (half-circle D shape)
+          it.filled_circle(85,  100, 13, Color(215, 255, 225));
+          it.filled_rectangle(72,  87, 26, 13, Color(0, 8, 4));
+          it.filled_circle(155, 100, 13, Color(215, 255, 225));
+          it.filled_rectangle(142, 87, 26, 13, Color(0, 8, 4));
+          // Animated talking mouth
+          int tp = (id(anim_frame) * 2) % 8;
+          int mo = (tp < 4) ? tp : (7 - tp);
+          it.filled_circle(120, 131, 5 + mo * 3, Color(15, 38, 22));
+          it.circle(120, 131, 6 + mo * 3, Color(95, 235, 145));
+          // STT text
+          std::string stt = id(stt_text);
+          if (!stt.empty()) {
+            if (stt.length() <= 14) {
+              it.print(120, 168, id(font_medium), Color(135, 255, 165), TextAlign::CENTER, stt.c_str());
+            } else {
+              size_t sp = stt.rfind(' ', 14);
+              if (sp == std::string::npos) sp = 14;
+              std::string l1 = stt.substr(0, sp);
+              std::string l2 = stt.substr(stt[sp] == ' ' ? sp+1 : sp);
+              if (l2.length() > 14) l2 = l2.substr(0, 12) + "..";
+              it.print(120, 160, id(font_medium), Color(135, 255, 165), TextAlign::CENTER, l1.c_str());
+              it.print(120, 184, id(font_medium), Color(135, 255, 165), TextAlign::CENTER, l2.c_str());
+            }
           }
+
       - id: page_error
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 110, id(font_large), Color(255,50,50), TextAlign::CENTER, "Error");
+          it.fill(Color(10, 2, 2));
+          it.circle(120, 120, 116, Color(125, 18, 18));
+          it.circle(120, 120, 85,  Color(85,  12, 12));
+          // X eyes
+          it.line(79, 91, 91, 109, Color(255, 50, 50));
+          it.line(91, 91, 79, 109, Color(255, 50, 50));
+          it.line(80, 91, 92, 109, Color(255, 50, 50));
+          it.line(92, 91, 80, 109, Color(255, 50, 50));
+          it.line(149, 91, 161, 109, Color(255, 50, 50));
+          it.line(161, 91, 149, 109, Color(255, 50, 50));
+          it.line(150, 91, 162, 109, Color(255, 50, 50));
+          it.line(162, 91, 150, 109, Color(255, 50, 50));
+          // Frown
+          for (int i = -24; i <= 24; i += 3) {
+            float t = (float)i / 24.0f;
+            int y = 135 - (int)(10.0f * (1.0f - t*t));
+            it.filled_circle(120 + i, y, 2, Color(255, 50, 50));
+          }
+
       - id: page_muted
         lambda: |-
-          it.fill(Color::BLACK);
-          it.print(120, 110, id(font_large), Color(150,150,150), TextAlign::CENTER, "Muted");
+          it.fill(Color(8, 8, 10));
+          it.circle(120, 120, 116, Color(42, 42, 52));
+          it.circle(120, 120, 85,  Color(28, 28, 38));
+          // Closed eyes (flat lines)
+          it.filled_rectangle(73,  99, 24, 3, Color(155, 155, 175));
+          it.filled_rectangle(143, 99, 24, 3, Color(155, 155, 175));
+          // Neutral eyebrows
+          it.line(73, 84, 96, 84, Color(100, 100, 120));
+          it.line(144, 84, 167, 84, Color(100, 100, 120));
+          // Mouth with zip stitch marks
+          it.filled_rectangle(94, 128, 52, 3, Color(115, 115, 135));
+          for (int i = 0; i <= 5; i++) {
+            it.line(98 + i*9, 125, 98 + i*9, 132, Color(70, 70, 90));
+          }
 
 # -------------------------------------------------------
 # Scripts
