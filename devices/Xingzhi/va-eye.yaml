@@ -122,7 +122,7 @@ audio_dac:
     i2c_id: bus_a
     bits_per_sample: 16bit
     sample_rate: 16000
-    mic_gain: 12dB
+    mic_gain: 18dB
 
 # -------------------------------------------------------
 # Microphone + Speaker via ES8311
