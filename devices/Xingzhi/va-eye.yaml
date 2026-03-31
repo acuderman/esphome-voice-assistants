@@ -25,6 +25,13 @@ esphome:
           id: Sled
           brightness: 100%
       - script.execute: draw_display
+      # ES8311 anti-pop: set output resistance to max during transitions
+      - lambda: |-
+          uint8_t val = 0x00;
+          i2c::I2CDevice dev;
+          dev.set_i2c_bus(bus_a);
+          dev.set_i2c_address(0x18);
+          dev.write_register(0x45, &val, 1);  // DAC power-down control
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -115,7 +122,7 @@ audio_dac:
     i2c_id: bus_a
     bits_per_sample: 16bit
     sample_rate: 16000
-    mic_gain: 30dB
+    mic_gain: 12dB
 
 # -------------------------------------------------------
 # Microphone + Speaker via ES8311
@@ -140,6 +147,24 @@ speaker:
     audio_dac: es8311_dac
     sample_rate: 48000
     channel: mono
+
+  - platform: mixer
+    id: mixing_speaker
+    output_speaker: spk
+    num_channels: 1
+    source_speakers:
+      - id: announcement_mixer_input
+      - id: silence_mixer_input
+
+  - platform: resampler
+    id: announcement_resampling_input
+    output_speaker: announcement_mixer_input
+    sample_rate: 48000
+
+  - platform: resampler
+    id: silence_resampling_input
+    output_speaker: silence_mixer_input
+    sample_rate: 48000
 
 # -------------------------------------------------------
 # Speaker enable GPIO46 + Backlight GPIO42 + WS2812 GPIO48
@@ -211,8 +236,8 @@ media_player:
     name: Media Player
     id: mp
     announcement_pipeline:
-      speaker: spk
-      format: WAV
+      speaker: announcement_resampling_input
+      format: FLAC
       sample_rate: 48000
       num_channels: 1
     buffer_size: 250000
@@ -239,11 +264,11 @@ micro_wake_word:
   id: mww
   models:
     - model: okay_nabu
-      probability_cutoff: 0.85
-      sliding_window_size: 10
+      probability_cutoff: 0.92
+      sliding_window_size: 15
     - model: hey_jarvis
-      probability_cutoff: 0.85
-      sliding_window_size: 10
+      probability_cutoff: 0.92
+      sliding_window_size: 15
   on_wake_word_detected:
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
@@ -256,9 +281,8 @@ voice_assistant:
   microphone: mic
   media_player: mp
   micro_wake_word: mww
-  noise_suppression_level: 4
-  auto_gain: 31dBFS
-  volume_multiplier: 2.0
+  noise_suppression_level: 2
+  volume_multiplier: 4.0
 
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_phase_id};
@@ -303,11 +327,14 @@ voice_assistant:
           - media_player.is_announcing:
         timeout: 0.5s
     - wait_until:
-        - and:
-            - not:
-                media_player.is_announcing:
-            - not:
-                speaker.is_playing:
+        condition:
+          - and:
+              - not:
+                  media_player.is_announcing:
+              - not:
+                  speaker.is_playing:
+                    id: spk
+        timeout: 60s
     - if:
         condition:
           - lambda: return id(wake_word_engine_location).current_option() == "On device";
