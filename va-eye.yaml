@@ -90,6 +90,10 @@ globals:
     type: int
     restore_value: false
     initial_value: "0"
+  - id: stt_retry_count
+    type: int
+    restore_value: false
+    initial_value: "0"
 
 # -------------------------------------------------------
 # I2C — ES8311 codec control
@@ -315,7 +319,9 @@ voice_assistant:
         effect: pulse_slow
 
   on_stt_end:
-    - lambda: id(stt_text) = x;
+    - lambda: |-
+        id(stt_text) = x;
+        id(stt_retry_count) = 0;
     - script.execute: draw_display
 
   on_stt_vad_end:
@@ -368,21 +374,48 @@ voice_assistant:
   on_error:
     - if:
         condition:
-          lambda: return !id(init_in_progress);
+          lambda: return !id(init_in_progress) && (code == "stt-no-text-recognized" || code == "intent-failed") && id(stt_retry_count) < 2;
         then:
-          - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
+          - lambda: id(stt_retry_count) += 1;
+          - if:
+              condition:
+                lambda: return id(stt_retry_count) == 1;
+              then:
+                - homeassistant.service:
+                    service: tts.speak
+                    data:
+                      entity_id: tts.piper
+                      media_player_entity_id: media_player.voice_assistant_ball
+                      message: "I didn't quite catch that. Please repeat."
+              else:
+                - homeassistant.service:
+                    service: tts.speak
+                    data:
+                      entity_id: tts.piper
+                      media_player_entity_id: media_player.voice_assistant_ball
+                      message: "Sorry, one more time please."
+          - delay: 3s
+          - lambda: id(voice_assistant_phase) = ${voice_assist_listening_phase_id};
           - script.execute: draw_display
-          - light.turn_on:
-              id: led
-              red: 100%
-              green: 0%
-              blue: 0%
-              brightness: 100%
-              effect: none
-          - delay: 2s
-          - light.turn_off: led
-          - script.execute: set_idle_or_mute_phase
-          - script.execute: draw_display
+          - voice_assistant.start:
+        else:
+          - if:
+              condition:
+                lambda: return !id(init_in_progress);
+              then:
+                - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
+                - script.execute: draw_display
+                - light.turn_on:
+                    id: led
+                    red: 100%
+                    green: 0%
+                    blue: 0%
+                    brightness: 100%
+                    effect: none
+                - delay: 2s
+                - light.turn_off: led
+                - script.execute: set_idle_or_mute_phase
+                - script.execute: draw_display
 
   on_client_connected:
     - lambda: id(init_in_progress) = false;
