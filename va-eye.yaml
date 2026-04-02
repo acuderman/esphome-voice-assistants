@@ -289,7 +289,7 @@ micro_wake_word:
   id: mww
   models:
     - model: okay_nabu
-      probability_cutoff: 0.92
+      probability_cutoff: 0.85
       sliding_window_size: 15
   on_wake_word_detected:
     - voice_assistant.start:
